@@ -166,15 +166,18 @@ class Engine:
         pts = [((px + 0.5) * sx, (py + 0.5) * sy) for px, py in pos + neg]
         box = (max(0, (x - r) * sx), max(0, (y - r) * sy), min(W, (x + w + r) * sx), min(H, (y + h + r) * sy))
         out = np.minimum(self.sam(image_id, rgb, pts, [1] * len(pos) + [0] * len(neg), box, on_status), region)
-        # objects the deep points missed (a castle on a painted hill): keep each one that lies inside the paint;
-        # the widest mask at a point, so a field of the painted-over valley is judged as the whole valley
+        # what SAM left out of the paint (a castle on a painted hill): BiRefNet on each leftover piece, in context
+        left = on & (cv2.resize(out, paint.shape[::-1], interpolation=cv2.INTER_AREA) <= 127)
+        left = cv2.morphologyEx(left, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))  # drop specks and threads
+        n, lab, st, _ = cv2.connectedComponentsWithStats(left)
+        for i in sorted(range(1, n), key=lambda i: -st[i, cv2.CC_STAT_AREA])[:8]:
+            if st[i, cv2.CC_STAT_AREA] < (0.01 * max(paint.shape)) ** 2:
+                break
+            piece = cv2.resize(maskops.grow((lab == i).astype(np.uint8) * 255, r), (W, H), interpolation=cv2.INTER_LINEAR)
+            m = self.subject(rgb, region=piece, on_status=on_status)
+            if (m > 127)[piece > 127].mean() < 0.95:  # nearly all the piece: BiRefNet took sky or valley as the subject
+                out = np.maximum(out, m)
         inside = region > 127
-        rest = maskops.grow(on & (cv2.resize(out, paint.shape[::-1], interpolation=cv2.INTER_AREA) <= 127), -r)
-        for px, py in _spread(rest, 16):  # ponytail: one SAM call per point, batch the prompts if this is slow
-            m = self.sam(image_id, rgb, [((px + 0.5) * sx, (py + 0.5) * sy)], [1], None, on_status, True)
-            k = m > 127
-            if k.any() and (k & ~inside).sum() < 0.02 * k.sum():
-                out = np.maximum(out, np.minimum(m, region))
         out = maskops.fill_holes(out, ~inside)  # SAM speckle inside the paint: background must reach outside it
         if not (out > 127).any():  # SAM found nothing: keep the paint, border snapped to the photo
             out = maskops.guided_upsample(paint.astype(np.float32) / 255, rgb, max(paint.shape))
@@ -258,11 +261,8 @@ class Engine:
         return emb
 
     @torch.inference_mode()
-    def sam(self, image_id, rgb, points, labels, box=None, on_status=lambda msg: None, largest=False):
-        """points: [(x, y)] in image px, labels: 1 include / 0 exclude, box: (x0, y0, x1, y1) or None.
-
-        largest: for a single point, the widest of SAM's 3 masks instead of the most confident one.
-        """
+    def sam(self, image_id, rgb, points, labels, box=None, on_status=lambda msg: None):
+        """points: [(x, y)] in image px, labels: 1 include / 0 exclude, box: (x0, y0, x1, y1) or None."""
         emb = self.sam_prepare(image_id, rgb, on_status)
         small, s = self._sam_inputs(rgb)
         size = [[small.shape[0], small.shape[1]]]
@@ -278,7 +278,7 @@ class Engine:
         with autocast():
             out = self.model(image_embeddings=emb, multimask_output=single, **args)
         logits = out.pred_masks[0, 0].float()  # (n_masks, h, w), covers the whole (resized) image
-        best = int((logits > 0).sum((1, 2)).argmax() if largest else out.iou_scores[0, 0].argmax()) if single else 0
+        best = int(out.iou_scores[0, 0].argmax()) if single else 0
         H, W = rgb.shape[:2]
         k = min(1.0, maskops.WORK / max(H, W))
         # upsample logits (not probabilities) so the edge stays sharp before the guided filter

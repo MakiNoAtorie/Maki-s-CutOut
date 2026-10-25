@@ -17,11 +17,12 @@
 - The subject is fully opaque. Before, it was very slightly transparent everywhere.
 - Feather and Shrink no longer change the colours of the subject when Defringe is on. Defringe now only cleans pixels that are really part subject, part background.
 - Refine edges no longer adds a ring of background around the subject with a soft halo at its outer edge.
-- Paint region: the painted area defines what to keep. Background painted over by accident near the edge (sky above a hill, for example) is trimmed, and the model sees the whole surroundings for context. Before, it kept only the most visible object inside the paint, so a painted hill or wall came back nearly empty.
+- Paint region: the painted area defines what to keep. Background painted over by accident near the edge (sky above a hill, for example) is trimmed, and the model sees the whole surroundings for context. Before, it kept only the most visible object inside the paint, so a painted hill or wall came back nearly empty. Things that stand apart inside the paint, such as a castle on a painted hill, are kept whole, thin towers and walls included.
 - Auto subject: a dragged rectangle is now given the same context padding as a painted area before detection, so a thin rectangle is no longer squashed into the model's square input. The result still stays inside the rectangle.
 - Auto subject: pressing Detect subject while a rectangle selection is pending applies that selection first, like switching modes does. Before, it was silently dropped.
 - Auto subject: Reach, used after Enter, now combines with the Combine choice that was active when you pressed Enter. Before, it used the choice from the moment of detection.
 - Refine edges on an empty selection no longer adds a duplicate undo step.
+- Refine edges on a large selection with no clear subject (a whole hill, for example) no longer eats away thin parts and gaps of the selection. It leaves the selection unchanged and says why in the status bar.
 - Model download: answering Yes no longer loses the clicks or paint strokes that triggered it. Click select and Paint region continue from where you were.
 
 ## 0.1.0 (2026-10-25)
