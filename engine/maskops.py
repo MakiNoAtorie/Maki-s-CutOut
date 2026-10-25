@@ -302,7 +302,8 @@ if __name__ == "__main__":
     up = guided_upsample(lr, rgb, 64)
     assert up.shape == (H, W) and abs(up.astype(float) / 255 - a_true).mean() < 0.01, "guided upsample"
     iso = (a_true[..., None] * [190, 60, 80] + (1 - a_true[..., None]) * [60, 110, 120]).astype(np.uint8)  # greys 101 / 96
-    assert abs(guided_upsample(lr, iso, 64).astype(float) / 255 - a_true).mean() < 0.01, "colour guide: iso-luminant edge"
+    # mean abs error: grey guide 0.0043, bilinear 0.0059, colour guide 0.0001
+    assert abs(guided_upsample(lr, iso, 64).astype(float) / 255 - a_true).mean() < 0.002, "colour guide: iso-luminant edge"
 
     # hard-edged textured disc, soft 4.7x-upsampled model edge: snap to the image, no halo, solid interior
     yy, xx = np.mgrid[:900, :1200]
