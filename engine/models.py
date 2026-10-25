@@ -261,8 +261,11 @@ class Engine:
             return self.model.get_image_embeddings(pix)
 
     @torch.inference_mode()
-    def _sam_decode(self, emb, size, points, labels, box, multimask):
-        """Low-res logits (h, w) of SAM's mask, the most confident one if multimask. Prompts in px of an image of size (H, W)."""
+    def _sam_decode(self, emb, size, points, labels, box, multimask, masks=None):
+        """Low-res logits (h, w) of SAM's mask, the most confident one if multimask.
+
+        Prompts in px of an image of size (H, W). masks: (1, 1, h, w) logits of an earlier pass as a mask prompt, or None.
+        """
         kw = {}
         if points:
             kw["input_points"] = [[[list(p) for p in points]]]
@@ -272,7 +275,7 @@ class Engine:
         enc = self.processor(original_sizes=[list(size)], return_tensors="pt", **kw)
         args = {k: enc[k].to(DEVICE) for k in ("input_points", "input_labels", "input_boxes") if k in enc}
         with autocast():
-            out = self.model(image_embeddings=emb, multimask_output=multimask, **args)
+            out = self.model(image_embeddings=emb, multimask_output=multimask, input_masks=masks, **args)
         return out.pred_masks[0, 0, int(out.iou_scores[0, 0].argmax()) if multimask else 0].float()
 
     @torch.inference_mode()
@@ -290,17 +293,40 @@ class Engine:
 
     @torch.inference_mode()
     def sam(self, image_id, rgb, points, labels, box=None, on_status=lambda msg: None):
-        """points: [(x, y)] in image px, labels: 1 include / 0 exclude, box: (x0, y0, x1, y1) or None."""
+        """points: [(x, y)] in image px, labels: 1 include / 0 exclude, box: (x0, y0, x1, y1) or None.
+
+        A second pass prompts SAM again on the first mask's box, padded 10%: one logit of the whole image is
+        ~23 px of a 5853 px photo, too coarse for the guided filter to find the edge.
+        """
         emb = self.sam_prepare(image_id, rgb, on_status)
         small, s = self._sam_inputs(rgb)
         single = len(points) == 1 and box is None  # ambiguous prompt: let SAM pick among 3 masks
         logits = self._sam_decode(emb, small.shape[:2], [(x * s, y * s) for x, y in points], labels,
                                   None if box is None else [v * s for v in box], single)  # covers the whole (resized) image
         H, W = rgb.shape[:2]
+        out = np.zeros((H, W), np.uint8)
+        x0, y0, x1, y1 = 0, 0, W, H
+        lh, lw = logits.shape
+        b = maskops.bbox((logits > 0).cpu().numpy(), 0)
+        if b is not None and (b[2] - b[0]) * (b[3] - b[1]) <= 0.6 * lh * lw:  # most of the image: no gain
+            b = (b[0] * W // lw, b[1] * H // lh, -(-b[2] * W // lw), -(-b[3] * H // lh))
+            x0, y0, x1, y1 = maskops.pad_box(b, round(0.1 * max(b[2] - b[0], b[3] - b[1])), W, H)
+            # first-pass logits resampled onto the crop: the mask prompt
+            th = torch.tensor([[(x1 - x0) / W, 0, (x0 + x1) / W - 1], [0, (y1 - y0) / H, (y0 + y1) / H - 1]],
+                              device=logits.device)
+            grid = torch.nn.functional.affine_grid(th[None], [1, 1, lh, lw], align_corners=False)
+            prior = torch.nn.functional.grid_sample(logits[None, None], grid, align_corners=False)
+            rgb = rgb[y0:y1, x0:x1]
+            small, s = self._sam_inputs(rgb)
+            pts = [((x - x0) * s, (y - y0) * s) for x, y in points]
+            crop_box = None if box is None else [(v - o) * s for v, o in zip(box, (x0, y0, x0, y0))]
+            logits = self._sam_decode(self._sam_embed(rgb), small.shape[:2], pts, labels, crop_box, False, prior)
+            H, W = rgb.shape[:2]
         k = min(1.0, maskops.WORK / max(H, W))
         # upsample logits (not probabilities) so the edge stays sharp before the guided filter
         lg = torch.nn.functional.interpolate(logits[None, None], size=(round(H * k), round(W * k)), mode="bilinear")
         # SAM logits are uncalibrated (threshold 0); sharpen so the interior is solid and the
         # guided filter, not logit noise, decides the soft edge
         soft = (lg * 4).sigmoid()[0, 0].cpu().numpy()
-        return maskops.guided_upsample(soft, rgb, logits.shape[-1])
+        out[y0:y1, x0:x1] = maskops.guided_upsample(soft, rgb, logits.shape[-1])  # first logits < 0 outside
+        return out
