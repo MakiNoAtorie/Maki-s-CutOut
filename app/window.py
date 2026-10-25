@@ -6,7 +6,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
-from PySide6.QtCore import QMimeData, QObject, QRectF, Qt, Signal
+from PySide6.QtCore import QMimeData, QObject, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QGuiApplication, QImage, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox, QColorDialog, QComboBox, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
@@ -145,10 +145,14 @@ class MainWindow(QMainWindow):
         sb.messageChanged.connect(lambda m: m.startswith("Error: ") or sb.setToolTip(""))
         self._update_status()
         if not is_cached("BiRefNet"):
-            sb.showMessage("Models are not downloaded yet (~1.5 GB total). You will be asked before each one is fetched.")
+            sb.showMessage(f"Models are not downloaded yet (~{sum(DOWNLOAD_MB.values()) / 1000:.1f} GB total). "
+                           "You will be asked before each one is fetched.")
         else:  # load while the user picks an image: imports alone take ~8 s on Windows
             self.models.submit("prep", lambda s: self.engine.use("BiRefNet", self.models.status.emit), lambda r: None)
         self._update_actions()
+        # Fine edges is on by default, so its model is asked for at launch, not on the first click
+        if is_cached("BiRefNet") and not is_cached("ViTMatte small"):
+            QTimer.singleShot(0, lambda: self._failed("ModelMissing: ViTMatte small"))
 
     def _failed(self, m):
         if m.startswith("ModelMissing: "):

@@ -6,6 +6,7 @@
 
 - Auto subject: a **Reach** slider. Move it right to take in parts the model was unsure about, or left to keep only what it is sure of. It changes the last detection in place, without running the model again or adding an undo step.
 - Click select and Paint region: a **Fine edges** option, on by default. A matting model (ViTMatte) refines the border at full resolution, so hair and soft edges come out cleaner. It downloads ~105 MB the first time.
+- If the main model is already downloaded but the Fine edges model is not, CutOut asks to download it at launch, not on the first click.
 
 ### Changed
 
