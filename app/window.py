@@ -141,6 +141,8 @@ class MainWindow(QMainWindow):
         self._update_status()
         if not is_cached("BiRefNet"):
             sb.showMessage("Models are not downloaded yet (~1.5 GB total). You will be asked before each one is fetched.")
+        else:  # load while the user picks an image: imports alone take ~8 s on Windows
+            self.models.submit("prep", lambda s: self.engine.use("BiRefNet", self.models.status.emit), lambda r: None)
         self._update_actions()
 
     def _failed(self, m):
@@ -281,7 +283,9 @@ class MainWindow(QMainWindow):
         split.addWidget(self._pane("Preview", self.preview, bg, self.link,
                                    self._button("Fit", lambda: self.preview.fit()),
                                    self._button("100%", lambda: self.preview.set_zoom(1))))
-        split.setSizes([1, 1])
+        split.setSizes([10000, 10000])  # [1, 1] clamps to each pane's minimum width, so the wider Preview header won
+        for i in (0, 1):  # keep the panes equal when the window is resized or maximized
+            split.setStretchFactor(i, 1)
         self.setCentralWidget(split)
 
         sb = self.statusBar()
