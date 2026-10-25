@@ -153,7 +153,7 @@ class MainWindow(QMainWindow):
     def _failed(self, m):
         if m.startswith("ModelMissing: "):
             name = m.removeprefix("ModelMissing: ")
-            if self._asking:  # one question at a time; the Yes callback retries the dropped action
+            if self._asking:  # one question at a time; Yes reruns the current mode's prompts
                 return
             self._asking = True
             ans = QMessageBox.question(
@@ -162,9 +162,10 @@ class MainWindow(QMainWindow):
                 "Download it now into models/? Needs internet; first time only.",
                 QMessageBox.Yes | QMessageBox.No)
             self._asking = False
-            if ans == QMessageBox.Yes:  # then redo what failed: auto-detect / prep (Refine is pressed again)
+            if ans == QMessageBox.Yes:  # retry: Click select / Paint region keep their prompts; Refine is pressed again
+                retry = {"Click select": self.run_sam, "Paint region": self.run_paint}
                 self.models.submit("download", lambda s: self.engine.download(name, self.models.status.emit),
-                                   self._guard(lambda r: (self.mode_changed(), self.refresh())))
+                                   self._guard(lambda r: (retry.get(self.mode_name(), self.mode_changed)(), self.refresh())))
             else:
                 self.statusBar().showMessage(f"{name} not downloaded — the action was skipped", 6000)
             return
@@ -523,6 +524,8 @@ class MainWindow(QMainWindow):
             return
         rgb = self.rgb
         if box is None:  # whole image: commits directly
+            if self.candidate is not None:  # a pending candidate is committed first, as on a mode switch
+                self.apply()
             self.reset_session(refresh=False)
         else:  # limited to a box: a candidate like every other prompt
             self.box = box
@@ -628,6 +631,8 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def apply(self):
+        if self._subj is not None and self.candidate is self._subj["out"]:  # Reach recombines like this commit
+            self._subj["base"], self._subj["op"] = self.base(), self.op_name()
         if self.candidate is not None:
             self.commit(maskops.combine(self.base(), self.candidate, self.op_name()))
         self.reset_session()
@@ -640,7 +645,7 @@ class MainWindow(QMainWindow):
         if base is None:
             return self.statusBar().showMessage("Nothing to refine yet: make a selection first", 5000)
         self.models.submit("refine", lambda s: self.engine.refine(rgb, base, self.models.status.emit),
-                           self._guard(lambda r: self.base() is base and self.commit(r)))
+                           self._guard(lambda r: r is not base and self.base() is base and self.commit(r)))
 
     def reset_session(self, refresh=True):
         self.points, self.labels, self.box, self.key_pick = [], [], None, None

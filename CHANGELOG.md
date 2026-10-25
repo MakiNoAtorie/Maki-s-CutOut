@@ -18,6 +18,11 @@
 - Feather and Shrink no longer change the colours of the subject when Defringe is on. Defringe now only cleans pixels that are really part subject, part background.
 - Refine edges no longer adds a ring of background around the subject with a soft halo at its outer edge.
 - Paint region keeps only the subject inside the painted area. Before, it often kept the whole painted area, background included.
+- Auto subject: a dragged rectangle is now given the same context padding as a painted area before detection, so a thin rectangle is no longer squashed into the model's square input. The result still stays inside the rectangle.
+- Auto subject: pressing Detect subject while a rectangle selection is pending applies that selection first, like switching modes does. Before, it was silently dropped.
+- Auto subject: Reach, used after Enter, now combines with the Combine choice that was active when you pressed Enter. Before, it used the choice from the moment of detection.
+- Refine edges on an empty selection no longer adds a duplicate undo step.
+- Model download: answering Yes no longer loses the clicks or paint strokes that triggered it. Click select and Paint region continue from where you were.
 
 ## 0.1.0 (2026-10-25)
 

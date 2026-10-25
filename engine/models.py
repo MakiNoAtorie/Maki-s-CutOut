@@ -132,10 +132,14 @@ class Engine:
         """Model output for subject_mask: (probability map at model res, crop box, region crop or None).
 
         region: uint8 HxW, 255 = area of interest. Only its padded bounding box is processed, and the result
-        is clipped to the region.
+        is clipped to the region. rect is treated as a filled rectangular region.
         """
         self.use("BiRefNet", on_status)
         H, W = rgb.shape[:2]
+        if region is None and rect is not None:
+            x0, y0, x1, y1 = rect
+            region = np.zeros((H, W), np.uint8)
+            region[y0:y1, x0:x1] = 255
         if region is not None:
             rect = maskops.bbox(region, 127)
             if rect is None:
