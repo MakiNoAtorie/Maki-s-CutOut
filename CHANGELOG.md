@@ -13,6 +13,8 @@
 ### Fixed
 
 - Auto subject, Click select and Refine: edges are no longer blurred where the subject and the background have similar brightness (for example a red hat on a dark grey wall).
+- Auto subject, Click select and Refine: edges follow the photo closely. There is no more soft band just inside the edge and no faint blurred copy of the subject just outside it.
+- The subject is fully opaque. Before, it was very slightly transparent everywhere.
 
 ## 0.1.0 (2026-10-25)
 
