@@ -414,6 +414,8 @@ class MainWindow(QMainWindow):
         self.history, self.redo_stack = [], []
         self._latest = None
         self._dist = (None, None)
+        self._subj = None  # holds the previous image's full-res rgb
+        self.reach.setValue(0)  # Reach tunes one detection; a new image starts from the model's own cut
         self.reset_session(refresh=False)
         self.source.set_image(self.rgb, self.rgb_proxy, fit=True)
         self.preview.set_image(self.rgb, self.rgb_proxy, fit=True)
@@ -695,6 +697,7 @@ class MainWindow(QMainWindow):
         base, cand, op = self.base(), self.candidate, self.op_name()
         rgb, rgbp = self.rgb, self.rgb_proxy
         params = self.grow.value(), self.feather.value(), self.defringe.value() / 100
+        show_proxy = self._guard(self._show_proxy)  # bind image_id here: the worker may run after a new image loads
 
         def job(stale):
             m = maskops.combine(base, cand, op) if cand is not None else base
@@ -708,7 +711,7 @@ class MainWindow(QMainWindow):
             if s == 1:
                 self._latest = (pa, proxy)
                 return proxy, proxy
-            self.cpu.done.emit(self._guard(self._show_proxy), proxy)  # fast feedback before full res
+            self.cpu.done.emit(show_proxy, proxy)  # fast feedback before full res
             if stale():
                 return None
             frgb, fa = maskops.finish(rgb, m, *params)
