@@ -10,6 +10,10 @@
 
 - Defringe starts at 100%. At 0%, background colour left in the soft edge pixels made a hazy halo that looked like a blurry edge.
 
+### Fixed
+
+- Auto subject, Click select and Refine: edges are no longer blurred where the subject and the background have similar brightness (for example a red hat on a dark grey wall).
+
 ## 0.1.0 (2026-10-25)
 
 First release.

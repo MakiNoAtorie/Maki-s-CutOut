@@ -18,7 +18,8 @@ def guided_upsample(mask_lr, rgb, model_res, eps=1e-3):
 
     Fast guided filter: coefficients are solved at <= WORK px, then applied at full res,
     so edges follow the full-resolution image.
-    ponytail: grayscale guide; a colour guide helps where fg/bg share luminance.
+    Where the guide has no local contrast the result falls back to the plain bilinear upsample.
+    ponytail: grayscale guide; a colour guide would keep the filter active where fg/bg share luminance.
     """
     H, W = rgb.shape[:2]
     s = min(1.0, WORK / max(H, W))
@@ -32,7 +33,9 @@ def guided_upsample(mask_lr, rgb, model_res, eps=1e-3):
     var = _box(I * I, r) - mI * mI
     a = cov / (var + eps)
     b = mp - a * mI
-    a, b = _box(a, r), _box(b, r)
+    # a flat guide (var below ~30 eps) gives a ~ 0 and b = box blur of p: use p itself there
+    c = _box(var / (var + 30 * eps), r)
+    a, b = c * _box(a, r), c * _box(b, r) + (1 - c) * p
     if s < 1.0:
         a = cv2.resize(a, (W, H), interpolation=cv2.INTER_LINEAR)
         b = cv2.resize(b, (W, H), interpolation=cv2.INTER_LINEAR)
@@ -230,7 +233,7 @@ if __name__ == "__main__":
 
     lr = cv2.resize(a_true.astype(np.float32), (64, 48), interpolation=cv2.INTER_AREA)
     up = guided_upsample(lr, rgb, 64)
-    assert up.shape == (H, W) and abs(up.astype(float) / 255 - a_true).mean() < 0.02, "guided upsample"
+    assert up.shape == (H, W) and abs(up.astype(float) / 255 - a_true).mean() < 0.01, "guided upsample"
 
     p = np.array([1e-4, 0.3, 0.5, 0.9, 1.0], np.float32)
     assert (shift_confidence(p, 0) == p).all()
