@@ -175,6 +175,7 @@ class Engine:
             k = m > 127
             if k.any() and (k & ~inside).sum() < 0.02 * k.sum():
                 out = np.maximum(out, np.minimum(m, region))
+        out = maskops.fill_holes(out, ~inside)  # SAM speckle inside the paint: background must reach outside it
         if not (out > 127).any():  # SAM found nothing: keep the paint, border snapped to the photo
             out = maskops.guided_upsample(paint.astype(np.float32) / 255, rgb, max(paint.shape))
         return out

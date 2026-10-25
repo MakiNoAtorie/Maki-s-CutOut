@@ -162,6 +162,24 @@ def band(mask, reach):
     return outer, core
 
 
+def fill_holes(mask, open_):
+    """mask with its enclosed background filled: a component of mask <= 127 that touches neither open_ nor the border.
+
+    Runs at <=1024 px, like band.
+    """
+    H, W = mask.shape
+    f = max(1.0, max(H, W) / 1024)
+    size = (round(W / f), round(H / f))
+    bg = cv2.resize((mask <= 127).astype(np.uint8), size, interpolation=cv2.INTER_AREA) > 0  # keep specks under 1 px
+    seed = cv2.resize(open_.astype(np.uint8), size, interpolation=cv2.INTER_AREA) > 0
+    seed[[0, -1], :] = seed[:, [0, -1]] = True  # the image border is open
+    _, lab = cv2.connectedComponents(bg.astype(np.uint8))
+    holes = bg & ~np.isin(lab, lab[seed & bg])
+    # grow 1 px: a hole is enclosed by foreground, so this only covers the mixed rim lost to the downscale
+    holes = cv2.dilate(holes.astype(np.uint8) * 255, np.ones((3, 3), np.uint8))
+    return np.maximum(mask, cv2.resize(holes, (W, H), interpolation=cv2.INTER_LINEAR))
+
+
 def grow(mask, px):
     if px == 0:
         return mask
@@ -264,6 +282,13 @@ if __name__ == "__main__":
     assert up3[(d3 >= 288) & (d3 < 297)].mean() > 0.97 * 255, "no haze inside a hard edge"
     assert up3[d3 < 150].min() == 255, "interior fully opaque"
 
+    ring = ((d3 < 300) & ~((d3 > 100) & (d3 < 110))).astype(np.uint8) * 255  # a disc with a closed gap ring
+    ring[440:460, 705:] = 0  # and a channel from the gap ring through the disc edge
+    fh = fill_holes(ring, np.zeros_like(ring, bool))
+    assert fh[450, 800] == 0 and fh[450, 495] == 0 and fh[d3 < 100].min() == 255, "open channel kept"
+    ring[440:460, 705:] = 255
+    assert fill_holes(ring, np.zeros_like(ring, bool))[(d3 > 101) & (d3 < 109)].min() == 255, "enclosed gap filled"
+    assert (fill_holes(ring, d3 > 104) == ring)[(d3 > 105) & (d3 < 109)].all(), "open_ seeds the background"
     p = np.array([1e-4, 0.3, 0.5, 0.9, 1.0], np.float32)
     assert (shift_confidence(p, 0) == p).all()
     assert ((shift_confidence(p, 3) > 0.5) == [0, 1, 1, 1, 1]).all(), "positive bias takes in more"
