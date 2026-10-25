@@ -245,15 +245,17 @@ def _spread(rgb_masked, w, f, sigma):
     return out
 
 
-def defringe(rgb, alpha, strength):
+def defringe(rgb, alpha, strength, extra=None):
     """Remove background colour bleed from semi-transparent edge pixels.
 
     Estimates local foreground F and background B colours, then solves I = aF + (1-a)B for F.
+    Pixels in extra (bool HxW) with alpha <= 2 take F.
     Only edge pixels are touched, so memory stays proportional to the edge, not the image.
     """
     if strength <= 0:
         return rgb
-    ys, xs = np.nonzero((alpha > 2) & (alpha < 250))
+    edge = (alpha > 2) & (alpha < 250)
+    ys, xs = np.nonzero(edge if extra is None else edge | extra)
     if not len(ys):
         return rgb
     H, W = alpha.shape
@@ -275,10 +277,14 @@ def defringe(rgb, alpha, strength):
 
 
 def finish(rgb, mask, grow_px=0, feather_px=0.0, defringe_amt=0.0, scale=1.0):
-    """Apply shrink/grow, feather and defringe. Pixel params are in full-res pixels; scale = this res / full."""
+    """Apply shrink/grow, feather and defringe. Pixel params are in full-res pixels; scale = this res / full.
+
+    Revealed and padded pixels take the foreground colour, so Grow and Feather cannot show a background rim.
+    """
     # defringe reads the raw mask: only there is a soft pixel a real colour mix
     a = feather(grow(mask, round(grow_px * scale)), feather_px * scale)
-    return defringe(rgb, mask, defringe_amt), a
+    extra = (grow((a > 2).astype(np.uint8), round(4 * scale) or 1) > 0) & (mask <= 2)
+    return defringe(rgb, mask, defringe_amt, extra), a
 
 
 if __name__ == "__main__":
@@ -345,4 +351,11 @@ if __name__ == "__main__":
     out2, edge2 = defringe(rgb2, m2, 1.0), (m2 > 60) & (m2 < 200)
     assert abs(out2[edge2][:, 0].mean() - 220) < 10, "defringe f=2 keeps red"
     assert abs(out2[edge2][:, 2].mean() - 30) < 10 < rgb2[edge2][:, 2].mean() - 30, "defringe f=2 removes blue"
+
+    mt = to_u8(a_true.copy())
+    fr, fa = finish(rgb, mt, grow_px=6, feather_px=3, defringe_amt=1.0)
+    red = lambda px: np.linalg.norm(px - [20, 40, 230], axis=1).mean() / np.linalg.norm(px - [220, 30, 30], axis=1).mean()
+    assert red(fr[(fa > 2) & (mt <= 2)]) > 2, "grow/feather reveal foreground colour, not background"
+    assert red(fr[(grow((fa > 2).astype(np.uint8), 4) > 0) & (fa <= 2)]) > 2, "export pads the edge with foreground"
+    assert (fr[mt >= 250] == rgb[mt >= 250]).all(), "interior colour unchanged"
     print("maskops ok")
