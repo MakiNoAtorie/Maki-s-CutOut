@@ -1,0 +1,7 @@
+.venv/
+models/
+__pycache__/
+test_images/
+smoke_out/
+.DS_Store
+Test images/

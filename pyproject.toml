@@ -1,0 +1,31 @@
+[project]
+name = "cutout"
+version = "0.1.0"
+description = "Local image extraction tool (BiRefNet, SAM 2.1, color key)"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.7",
+    "torchvision>=0.22",
+    "transformers>=4.56",
+    "timm",
+    "kornia",
+    "einops",
+    "huggingface_hub",
+    "numpy",
+    "pillow",
+    "opencv-python-headless",
+    "PySide6>=6.7",
+]
+
+# Windows: CUDA 13.0 wheels (12.8+ required) (needed for RTX 50xx / Blackwell sm_120). Mac/Linux: default PyPI wheels.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'win32'" }]
+torchvision = [{ index = "pytorch-cu130", marker = "sys_platform == 'win32'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv]
+package = false
