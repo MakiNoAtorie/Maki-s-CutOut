@@ -260,7 +260,7 @@ class MainWindow(QMainWindow):
         fin.addWidget(w)
         w, self.grow = labeled_slider("Shrink/Grow", -50, 50, 0, self.refresh, "{} px")
         fin.addWidget(w)
-        w, self.defringe = labeled_slider("Defringe", 0, 100, 0, self.refresh, "{} %")
+        w, self.defringe = labeled_slider("Defringe", 0, 100, 100, self.refresh, "{} %")
         fin.addWidget(w)
 
         self.source, self.preview = ImageView(), ImageView()
