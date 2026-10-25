@@ -222,6 +222,9 @@ class Engine:
         outer, core = maskops.band(m, reach)
         # no grey fill beyond the band: the model then mattes the whole band ring as foreground
         matte = maskops.guided_upsample(self._birefnet(crop), crop, BIREFNET_RES, eps=1e-4)
+        if (matte > 127)[outer > 127].mean() < 0.02:  # no subject for the matting model (a whole hill): keep the mask
+            on_status("Refine found no subject edges in this selection")
+            return mask
         out = mask.copy()
         # the matte only decides inside the band: it may add detail up to reach px out, never remove the core
         out[y0:y1, x0:x1] = np.maximum(np.minimum(matte, outer), core)
