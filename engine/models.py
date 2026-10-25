@@ -163,8 +163,19 @@ class Engine:
         near[max(0, y - h // 4):y + h + h // 4, max(0, x - w // 4):x + w + w // 4] = 1
         dout = cv2.distanceTransform(1 - on, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
         neg = _spread((dout >= 2 * r) & (near > 0), 8)
-        pts = [((px + 0.5) * sx, (py + 0.5) * sy) for px, py in pos + neg]
         box = (max(0, (x - r) * sx), max(0, (y - r) * sy), min(W, (x + w + r) * sx), min(H, (y + h + r) * sy))
+        # drop an include point whose own SAM object has (in paint) / (in box) < 0.8: dome valley 0.48-0.70, forest 0.87-1.00
+        emb = self.sam_prepare(image_id, rgb, on_status)
+        small, s = self._sam_inputs(rgb)
+        b = np.s_[max(0, y - r):y + h + r, max(0, x - r):x + w + r]  # box at paint res
+        keep = []
+        for px, py in pos:
+            o = self._sam_decode(emb, small.shape[:2], [((px + 0.5) * sx * s, (py + 0.5) * sy * s)], [1], None, True)
+            o = torch.nn.functional.interpolate(o[None, None], size=paint.shape, mode="bilinear")[0, 0].cpu().numpy()[b] > 0
+            if (o & on[b].astype(bool)).sum() >= 0.8 * o.sum():
+                keep.append((px, py))
+        pos = keep or [tuple(np.unravel_index(din.argmax(), din.shape)[::-1])]
+        pts = [((px + 0.5) * sx, (py + 0.5) * sy) for px, py in pos + neg]
         out = np.minimum(self.sam(image_id, rgb, pts, [1] * len(pos) + [0] * len(neg), box, on_status), region)
         # what SAM left out of the paint (a castle on a painted hill): BiRefNet on each leftover piece, in context
         left = on & (cv2.resize(out, paint.shape[::-1], interpolation=cv2.INTER_AREA) <= 127)
@@ -244,17 +255,34 @@ class Engine:
         return small, s
 
     @torch.inference_mode()
+    def _sam_embed(self, rgb):
+        pix = self.processor(images=self._sam_inputs(rgb)[0], return_tensors="pt")["pixel_values"].to(DEVICE)
+        with autocast():
+            return self.model.get_image_embeddings(pix)
+
+    @torch.inference_mode()
+    def _sam_decode(self, emb, size, points, labels, box, multimask):
+        """Low-res logits (h, w) of SAM's mask, the most confident one if multimask. Prompts in px of an image of size (H, W)."""
+        kw = {}
+        if points:
+            kw["input_points"] = [[[list(p) for p in points]]]
+            kw["input_labels"] = [[list(labels)]]
+        if box is not None:
+            kw["input_boxes"] = [[list(box)]]
+        enc = self.processor(original_sizes=[list(size)], return_tensors="pt", **kw)
+        args = {k: enc[k].to(DEVICE) for k in ("input_points", "input_labels", "input_boxes") if k in enc}
+        with autocast():
+            out = self.model(image_embeddings=emb, multimask_output=multimask, **args)
+        return out.pred_masks[0, 0, int(out.iou_scores[0, 0].argmax()) if multimask else 0].float()
+
+    @torch.inference_mode()
     def sam_prepare(self, image_id, rgb, on_status=lambda msg: None):
         """Load SAM and cache this image's embedding so the first click is fast."""
         self.use("SAM 2.1 small", on_status)
-        small, _ = self._sam_inputs(rgb)
         emb = self.sam_cache.get(image_id)
         if emb is None:
             on_status("Encoding image for SAM…")
-            pix = self.processor(images=small, return_tensors="pt")["pixel_values"].to(DEVICE)
-            with autocast():
-                emb = self.model.get_image_embeddings(pix)
-            self.sam_cache[image_id] = emb
+            emb = self.sam_cache[image_id] = self._sam_embed(rgb)
             while len(self.sam_cache) > 4:
                 self.sam_cache.popitem(last=False)
         self.sam_cache.move_to_end(image_id)
@@ -265,24 +293,13 @@ class Engine:
         """points: [(x, y)] in image px, labels: 1 include / 0 exclude, box: (x0, y0, x1, y1) or None."""
         emb = self.sam_prepare(image_id, rgb, on_status)
         small, s = self._sam_inputs(rgb)
-        size = [[small.shape[0], small.shape[1]]]
-        kw = {}
-        if points:
-            kw["input_points"] = [[[[x * s, y * s] for x, y in points]]]
-            kw["input_labels"] = [[list(labels)]]
-        if box is not None:
-            kw["input_boxes"] = [[[v * s for v in box]]]
-        enc = self.processor(original_sizes=size, return_tensors="pt", **kw)
-        args = {k: enc[k].to(DEVICE) for k in ("input_points", "input_labels", "input_boxes") if k in enc}
         single = len(points) == 1 and box is None  # ambiguous prompt: let SAM pick among 3 masks
-        with autocast():
-            out = self.model(image_embeddings=emb, multimask_output=single, **args)
-        logits = out.pred_masks[0, 0].float()  # (n_masks, h, w), covers the whole (resized) image
-        best = int(out.iou_scores[0, 0].argmax()) if single else 0
+        logits = self._sam_decode(emb, small.shape[:2], [(x * s, y * s) for x, y in points], labels,
+                                  None if box is None else [v * s for v in box], single)  # covers the whole (resized) image
         H, W = rgb.shape[:2]
         k = min(1.0, maskops.WORK / max(H, W))
         # upsample logits (not probabilities) so the edge stays sharp before the guided filter
-        lg = torch.nn.functional.interpolate(logits[best][None, None], size=(round(H * k), round(W * k)), mode="bilinear")
+        lg = torch.nn.functional.interpolate(logits[None, None], size=(round(H * k), round(W * k)), mode="bilinear")
         # SAM logits are uncalibrated (threshold 0); sharpen so the interior is solid and the
         # guided filter, not logit noise, decides the soft edge
         soft = (lg * 4).sigmoid()[0, 0].cpu().numpy()
