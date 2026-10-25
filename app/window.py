@@ -447,9 +447,9 @@ class MainWindow(QMainWindow):
         rgb, iid, st = self.rgb, self.image_id, self.models.status.emit
         if mode == "Auto subject" and not self.history:
             self.run_subject()
-        elif mode in ("Auto subject", "Paint region"):
+        elif mode == "Auto subject":
             self.models.submit("prep", lambda s: self.engine.use("BiRefNet", st), lambda r: None)
-        elif mode == "Click select":
+        elif mode in ("Click select", "Paint region"):
             self.models.submit("prep", lambda s: self.engine.sam_prepare(iid, rgb, st), lambda r: None)
         else:  # colour key needs no model: free the memory
             self.models.submit("prep", lambda s: self.engine.unload(), lambda r: None)
@@ -482,7 +482,7 @@ class MainWindow(QMainWindow):
         self.source.brush = self.brush.value()
 
     def on_paint(self, x, y, erase):
-        """Paint into a proxy-resolution mask; the paint is the selection, the model only adds detail at its border."""
+        """Paint into a proxy-resolution mask; SAM keeps the things inside it."""
         if self.paint is None:
             self.paint = np.zeros(self.rgb_proxy.shape[:2], np.uint8)
         s = self.rgb_proxy.shape[1] / self.rgb.shape[1]
@@ -501,10 +501,10 @@ class MainWindow(QMainWindow):
             self.models.cancel("paint")
             self.candidate = None
             return self.refresh()
-        rgb, paint = self.rgb, self.paint.copy()
+        rgb, iid, paint = self.rgb, self.image_id, self.paint.copy()
 
         def job(stale):
-            return self.engine.paint(rgb, paint, on_status=self.models.status.emit)
+            return self.engine.paint(iid, rgb, paint, on_status=self.models.status.emit)
 
         self.models.submit("paint", job, self._guard(self._set_candidate))
 

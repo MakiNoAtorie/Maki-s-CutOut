@@ -66,6 +66,20 @@ def subject_mask(rgb, raw, reach=0.0):
     return out
 
 
+def _spread(mask, n):
+    """Up to n (x, y) points of a boolean mask, spread out by farthest-point sampling."""
+    ys, xs = np.nonzero(mask)
+    p = np.stack([xs, ys], 1).astype(np.float32)[::max(1, len(xs) // 4096)]
+    if not len(p):
+        return []
+    pick = [p[len(p) // 2]]
+    d = ((p - pick[0]) ** 2).sum(1)
+    while len(pick) < min(n, len(p)) and d.max() > 0:
+        pick.append(p[d.argmax()])
+        d = np.minimum(d, ((p - pick[-1]) ** 2).sum(1))
+    return [(float(a), float(b)) for a, b in pick]
+
+
 class Engine:
     def __init__(self):
         self.name = None
@@ -128,18 +142,42 @@ class Engine:
         """Foreground mask of the whole image, inside rect=(x0, y0, x1, y1), or inside a painted region."""
         return subject_mask(rgb, self.subject_raw(rgb, rect, region, on_status))
 
-    def paint(self, rgb, paint, on_status=lambda msg: None):
-        """Painted area (uint8 mask at any res) with its border snapped to rgb, plus subject detail up to reach px out.
+    def paint(self, image_id, rgb, paint, on_status=lambda msg: None):
+        """The things inside the paint (uint8 mask at any res): SAM prompted from the paint, clipped to it plus reach px.
 
-        The paint is the selection: the model may add at the border, never remove inside it.
+        Points deep inside the paint include, points away from it exclude, so background painted over at the
+        rough edge is trimmed; SAM sees the whole image for context.
         """
         H, W = rgb.shape[:2]
-        snapped = maskops.guided_upsample(paint.astype(np.float32) / 255, rgb, max(paint.shape))
         reach = max(4, round(0.02 * max(H, W)))  # same rule as refine
+        sx, sy = W / paint.shape[1], H / paint.shape[0]
         # dilate at paint res: a ~2*reach px kernel at full res is slow
-        r = max(1, round(reach * paint.shape[1] / W))
+        r = max(1, round(reach / sx))
         region = cv2.resize(maskops.grow(paint, r), (W, H), interpolation=cv2.INTER_LINEAR)
-        return np.maximum(snapped, self.subject(rgb, region=region, on_status=on_status))
+        on = (paint > 127).astype(np.uint8)
+        din = cv2.distanceTransform(on, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+        m = din.max()
+        pos = _spread(din >= min(0.5 * m, max(8, 0.25 * m)), 8)  # deep inside: never on a rough stroke edge
+        x, y, w, h = cv2.boundingRect(on)
+        near = np.zeros_like(on)  # negatives describe the nearby background, not far corners
+        near[max(0, y - h // 4):y + h + h // 4, max(0, x - w // 4):x + w + w // 4] = 1
+        dout = cv2.distanceTransform(1 - on, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+        neg = _spread((dout >= 2 * r) & (near > 0), 8)
+        pts = [((px + 0.5) * sx, (py + 0.5) * sy) for px, py in pos + neg]
+        box = (max(0, (x - r) * sx), max(0, (y - r) * sy), min(W, (x + w + r) * sx), min(H, (y + h + r) * sy))
+        out = np.minimum(self.sam(image_id, rgb, pts, [1] * len(pos) + [0] * len(neg), box, on_status), region)
+        # objects the deep points missed (a castle on a painted hill): keep each one that lies inside the paint;
+        # the widest mask at a point, so a field of the painted-over valley is judged as the whole valley
+        inside = region > 127
+        rest = maskops.grow(on & (cv2.resize(out, paint.shape[::-1], interpolation=cv2.INTER_AREA) <= 127), -r)
+        for px, py in _spread(rest, 16):  # ponytail: one SAM call per point, batch the prompts if this is slow
+            m = self.sam(image_id, rgb, [((px + 0.5) * sx, (py + 0.5) * sy)], [1], None, on_status, True)
+            k = m > 127
+            if k.any() and (k & ~inside).sum() < 0.02 * k.sum():
+                out = np.maximum(out, np.minimum(m, region))
+        if not (out > 127).any():  # SAM found nothing: keep the paint, border snapped to the photo
+            out = maskops.guided_upsample(paint.astype(np.float32) / 255, rgb, max(paint.shape))
+        return out
 
     def subject_raw(self, rgb, rect=None, region=None, on_status=lambda msg: None):
         """Model output for subject_mask: (probability map at model res, crop box, region crop or None).
@@ -216,8 +254,11 @@ class Engine:
         return emb
 
     @torch.inference_mode()
-    def sam(self, image_id, rgb, points, labels, box=None, on_status=lambda msg: None):
-        """points: [(x, y)] in image px, labels: 1 include / 0 exclude, box: (x0, y0, x1, y1) or None."""
+    def sam(self, image_id, rgb, points, labels, box=None, on_status=lambda msg: None, largest=False):
+        """points: [(x, y)] in image px, labels: 1 include / 0 exclude, box: (x0, y0, x1, y1) or None.
+
+        largest: for a single point, the widest of SAM's 3 masks instead of the most confident one.
+        """
         emb = self.sam_prepare(image_id, rgb, on_status)
         small, s = self._sam_inputs(rgb)
         size = [[small.shape[0], small.shape[1]]]
@@ -233,7 +274,7 @@ class Engine:
         with autocast():
             out = self.model(image_embeddings=emb, multimask_output=single, **args)
         logits = out.pred_masks[0, 0].float()  # (n_masks, h, w), covers the whole (resized) image
-        best = int(out.iou_scores[0, 0].argmax()) if single else 0
+        best = int((logits > 0).sum((1, 2)).argmax() if largest else out.iou_scores[0, 0].argmax()) if single else 0
         H, W = rgb.shape[:2]
         k = min(1.0, maskops.WORK / max(H, W))
         # upsample logits (not probabilities) so the edge stays sharp before the guided filter
