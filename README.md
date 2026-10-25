@@ -29,7 +29,7 @@ The first run sets up the environment. You can also pass an image: `uv run main.
 
    | Mode | What it does |
    |---|---|
-   | Auto subject | Finds the main subject as soon as the image loads. Drag a rectangle to limit the search to one area. |
+   | Auto subject | Finds the main subject as soon as the image loads. Drag a rectangle to limit the search to one area. **Reach** takes in more (right) or less (left) of what the model was unsure about. |
    | Paint region | Paint roughly over what you want and it is cut out cleanly. Right-drag or Alt-drag erases. |
    | Click select | Left-click to include, right-click to exclude, drag to draw a box. |
    | Color key | Click a colour, for example the sky, to make it transparent. Instant, no model needed. |

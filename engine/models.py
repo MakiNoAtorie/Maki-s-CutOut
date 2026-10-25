@@ -55,6 +55,17 @@ def _load_model(cls, name, on_status=lambda msg: None, **kw):
     return _load(cls, name, on_status, dtype=torch.float32, **kw)
 
 
+def subject_mask(rgb, raw, reach=0.0):
+    """Full-res uint8 mask from Engine.subject_raw output. reach (logits) > 0 takes in more. Needs no model."""
+    out = np.zeros(rgb.shape[:2], np.uint8)
+    if raw is None:
+        return out
+    p, (x0, y0, x1, y1), region = raw
+    m = maskops.guided_upsample(maskops.shift_confidence(p, reach), rgb[y0:y1, x0:x1], BIREFNET_RES)
+    out[y0:y1, x0:x1] = m if region is None else np.minimum(m, region)
+    return out
+
+
 class Engine:
     def __init__(self):
         self.name = None
@@ -114,7 +125,11 @@ class Engine:
         return out.float().sigmoid()[0, 0].cpu().numpy()
 
     def subject(self, rgb, rect=None, region=None, on_status=lambda msg: None):
-        """Foreground mask of the whole image, inside rect=(x0, y0, x1, y1), or inside a painted region.
+        """Foreground mask of the whole image, inside rect=(x0, y0, x1, y1), or inside a painted region."""
+        return subject_mask(rgb, self.subject_raw(rgb, rect, region, on_status))
+
+    def subject_raw(self, rgb, rect=None, region=None, on_status=lambda msg: None):
+        """Model output for subject_mask: (probability map at model res, crop box, region crop or None).
 
         region: uint8 HxW, 255 = area of interest. Only its bounding box is processed; pixels outside it
         are greyed out so the model ignores them, and the result is clipped to the region.
@@ -124,7 +139,7 @@ class Engine:
         if region is not None:
             rect = maskops.bbox(region, 127)
             if rect is None:
-                return np.zeros((H, W), np.uint8)
+                return None
             # pad for context, then widen the short side to at most 3:1 so the square resize doesn't squash it
             x0, y0, x1, y1 = maskops.pad_box(rect, round(0.1 * max(rect[2] - rect[0], rect[3] - rect[1])), W, H)
             nw = min(W, max(x1 - x0, -(-(y1 - y0) // 3)))
@@ -138,12 +153,7 @@ class Engine:
             inp = crop.copy()
             inp[region[y0:y1, x0:x1] < 128] = 128
         on_status("Detecting subject…")
-        m = maskops.guided_upsample(self._birefnet(inp), crop, BIREFNET_RES)
-        if region is not None:
-            m = np.minimum(m, region[y0:y1, x0:x1])
-        out = np.zeros((H, W), np.uint8)
-        out[y0:y1, x0:x1] = m
-        return out
+        return self._birefnet(inp), (x0, y0, x1, y1), None if region is None else region[y0:y1, x0:x1]
 
     def refine(self, rgb, mask, on_status=lambda msg: None):
         """Re-matte the masked region with BiRefNet-matting for soft hair/branch alpha."""

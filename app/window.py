@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from engine import maskops
 from engine.device import device_label
-from engine.models import DOWNLOAD_MB, Engine, is_cached
+from engine.models import DOWNLOAD_MB, Engine, is_cached, subject_mask
 
 from .viewer import ImageView, make_proxy, to_qimage
 
@@ -132,6 +132,7 @@ class MainWindow(QMainWindow):
         self.paint = None  # uint8 paint mask at proxy resolution
         self._last_paint = None
         self._dist = (None, None)  # (pick, delta-E map), written by the cpu worker
+        self._subj = None  # last Auto subject detection, for Reach
         self._asking = False  # a model-download question is open
         self._latest = None  # (alpha, rgba) at full res, written by the cpu worker
         self.last_dir = Path.home()
@@ -213,9 +214,11 @@ class MainWindow(QMainWindow):
         sel.setMovable(False)
         self.panels = QStackedWidget()
         self.detect_btn = self._button("Detect subject", lambda: self.run_subject())
+        reach, self.reach = labeled_slider("Reach", -10, 10, 0, self.run_reach, "{:+}")
+        reach.setToolTip("Right takes in parts the model was unsure about, left keeps only what it is sure of")
         self.panels.addWidget(self._panel(
             QLabel("Drag a rectangle to limit detection · Esc clears it "),
-            self.detect_btn))
+            reach, self.detect_btn))
         brush, self.brush = labeled_slider("Brush", 5, 200, 40, self._brush_changed, "{} px")
         self.panels.addWidget(self._panel(
             QLabel("Paint over the area to extract · Right-drag or Alt-drag erases "),
@@ -522,17 +525,52 @@ class MainWindow(QMainWindow):
         else:  # limited to a box: a candidate like every other prompt
             self.box = box
             self._overlay()
-        base, op = self.base(), self.op_name()
-        key, cb = ("subject", lambda m: self._subject_done(base, op, m)) if box is None else ("box", self._set_candidate)
-        self.models.submit(key, lambda s: self.engine.subject(rgb, box, on_status=self.models.status.emit),
-                           self._guard(cb))
+        base, op, reach = self.base(), self.op_name(), self.reach.value() / 2
+
+        def job(stale):
+            raw = self.engine.subject_raw(rgb, box, on_status=self.models.status.emit)
+            return raw, subject_mask(rgb, raw, reach)
+
+        def done(r):
+            if box is None:
+                if not self._subject_done(base, op, r[1]):
+                    return
+            else:
+                self._set_candidate(r[1])
+            out = self.candidate if box is not None else self.base()
+            self._subj = dict(raw=r[0], rgb=rgb, base=base, op=op, out=out)  # kept for Reach changes
+
+        self.models.submit("subject" if box is None else "box", job, self._guard(done))
 
     def _subject_done(self, base, op, m):
         if self.base() is not base:  # undo/redo happened while detecting: the result no longer fits
-            return
+            return False
         self.commit(maskops.combine(base, m, op))
         if not (m > 127).any():
             self.statusBar().showMessage("No clear subject found: try Paint region or drag a rectangle", 8000)
+        return True
+
+    def run_reach(self):
+        """Redo the last detection's mask at the new Reach, in place, while it is still the current result."""
+        s = self._subj
+        if s is None or not (self.candidate is s["out"] or self.base() is s["out"]):
+            return
+        reach, pending = self.reach.value() / 2, self.candidate is s["out"]
+
+        def job(stale):
+            m = subject_mask(s["rgb"], s["raw"], reach)
+            return m if pending else maskops.combine(s["base"], m, s["op"])
+
+        def done(m):
+            if pending and self.candidate is s["out"]:
+                s["out"] = m
+                self._set_candidate(m)
+            elif not pending and self.base() is s["out"]:
+                s["out"] = self.history[-1] = m  # same undo step as the detection
+                self.redo_stack = []
+                self.refresh()
+
+        self.cpu.submit("reach", job, self._guard(done))
 
     def run_sam(self):
         self._overlay()

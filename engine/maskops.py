@@ -43,6 +43,17 @@ def guided_upsample(mask_lr, rgb, model_res, eps=1e-3):
     return to_u8(a)
 
 
+def shift_confidence(p, bias):
+    """Move the 0.5 cut of a 0..1 probability map by bias logits: > 0 takes in more, < 0 less.
+
+    Works in logit space because BiRefNet output is nearly binary: few pixels are between 0.01 and 0.99.
+    """
+    if not bias:
+        return p
+    p = np.clip(p, 1e-6, 1 - 1e-6)
+    return 1 / (1 + np.exp(-(np.log(p / (1 - p)) + bias)))
+
+
 def to_u8(x):
     """float 0..1 -> uint8, in place where possible."""
     x *= 255
@@ -218,6 +229,11 @@ if __name__ == "__main__":
     lr = cv2.resize(a_true.astype(np.float32), (64, 48), interpolation=cv2.INTER_AREA)
     up = guided_upsample(lr, rgb, 64)
     assert up.shape == (H, W) and abs(up.astype(float) / 255 - a_true).mean() < 0.02, "guided upsample"
+
+    p = np.array([1e-4, 0.3, 0.5, 0.9, 1.0], np.float32)
+    assert (shift_confidence(p, 0) == p).all()
+    assert (shift_confidence(p, 3) > p)[:4].all() and (shift_confidence(p, -3) < p).all(), "shift confidence"
+    assert shift_confidence(p, 10)[0] > 0.5 > shift_confidence(p, -10)[3]
 
     dist = color_distance(rgb, 10, 10)
     k = key_alpha(dist, 10, 10)
