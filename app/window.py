@@ -482,7 +482,7 @@ class MainWindow(QMainWindow):
         self.source.brush = self.brush.value()
 
     def on_paint(self, x, y, erase):
-        """Paint into a proxy-resolution mask; the region is coarse by nature, the model finds the edges."""
+        """Paint into a proxy-resolution mask; the paint is the selection, the model only adds detail at its border."""
         if self.paint is None:
             self.paint = np.zeros(self.rgb_proxy.shape[:2], np.uint8)
         s = self.rgb_proxy.shape[1] / self.rgb.shape[1]
@@ -501,12 +501,10 @@ class MainWindow(QMainWindow):
             self.models.cancel("paint")
             self.candidate = None
             return self.refresh()
-        rgb, H, W = self.rgb, *self.rgb.shape[:2]
-        paint = self.paint.copy()
+        rgb, paint = self.rgb, self.paint.copy()
 
         def job(stale):
-            region = cv2.resize(paint, (W, H), interpolation=cv2.INTER_LINEAR)
-            return self.engine.subject(rgb, region=region, on_status=self.models.status.emit)
+            return self.engine.paint(rgb, paint, on_status=self.models.status.emit)
 
         self.models.submit("paint", job, self._guard(self._set_candidate))
 

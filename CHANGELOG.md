@@ -17,7 +17,7 @@
 - The subject is fully opaque. Before, it was very slightly transparent everywhere.
 - Feather and Shrink no longer change the colours of the subject when Defringe is on. Defringe now only cleans pixels that are really part subject, part background.
 - Refine edges no longer adds a ring of background around the subject with a soft halo at its outer edge.
-- Paint region keeps only the subject inside the painted area. Before, it often kept the whole painted area, background included.
+- Paint region: the painted area is the selection. Its border snaps to the edges in the photo, and fine detail of the subject (hair, branches) just outside the paint is added. Before, it kept only the most visible object inside the paint, so a painted hill or wall came back nearly empty.
 - Auto subject: a dragged rectangle is now given the same context padding as a painted area before detection, so a thin rectangle is no longer squashed into the model's square input. The result still stays inside the rectangle.
 - Auto subject: pressing Detect subject while a rectangle selection is pending applies that selection first, like switching modes does. Before, it was silently dropped.
 - Auto subject: Reach, used after Enter, now combines with the Combine choice that was active when you pressed Enter. Before, it used the choice from the moment of detection.

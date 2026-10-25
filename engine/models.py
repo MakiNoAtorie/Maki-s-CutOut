@@ -128,6 +128,19 @@ class Engine:
         """Foreground mask of the whole image, inside rect=(x0, y0, x1, y1), or inside a painted region."""
         return subject_mask(rgb, self.subject_raw(rgb, rect, region, on_status))
 
+    def paint(self, rgb, paint, on_status=lambda msg: None):
+        """Painted area (uint8 mask at any res) with its border snapped to rgb, plus subject detail up to reach px out.
+
+        The paint is the selection: the model may add at the border, never remove inside it.
+        """
+        H, W = rgb.shape[:2]
+        snapped = maskops.guided_upsample(paint.astype(np.float32) / 255, rgb, max(paint.shape))
+        reach = max(4, round(0.02 * max(H, W)))  # same rule as refine
+        # dilate at paint res: a ~2*reach px kernel at full res is slow
+        r = max(1, round(reach * paint.shape[1] / W))
+        region = cv2.resize(maskops.grow(paint, r), (W, H), interpolation=cv2.INTER_LINEAR)
+        return np.maximum(snapped, self.subject(rgb, region=region, on_status=on_status))
+
     def subject_raw(self, rgb, rect=None, region=None, on_status=lambda msg: None):
         """Model output for subject_mask: (probability map at model res, crop box, region crop or None).
 

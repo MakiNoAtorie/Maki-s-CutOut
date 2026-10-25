@@ -67,11 +67,17 @@ def main():
     save(out, "subject_rect.png", *maskops.finish(rgb, eng.refine(rgb, mr), defringe_amt=1.0))
     region = np.zeros((H, W), np.uint8)  # painted blob over the left part (left tree in the landscape photos)
     cv2.ellipse(region, (W // 5, H // 2), (W // 4, H // 4), 0, 0, 360, 255, -1)
+    f = min(1.0, 2048 / max(H, W))  # the app paints at proxy res (viewer.PROXY)
+    paint = cv2.resize(region, (round(W * f), round(H * f)), interpolation=cv2.INTER_AREA)
     t = time.time()
-    mp = eng.subject(rgb, region=region)
-    print(f"subject in painted region: {time.time() - t:.1f}s  coverage {(mp > 127).mean():.2f}")
-    assert not mp[region == 0].any(), "result must stay inside the painted region"
-    save(out, "subject_paint.png", rgb, mp)
+    mp = eng.paint(rgb, paint)
+    out_d = cv2.distanceTransform(255 - region, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+    in_d = cv2.distanceTransform(region, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+    inner = (mp[in_d > 3 / f] > 127).mean()
+    print(f"paint region: {time.time() - t:.1f}s  coverage {(mp > 127).mean():.2f}  inner {inner:.3f}")
+    assert not mp[out_d > max(4, round(0.02 * max(H, W))) + 3 / f].any(), "result must stay within reach of the paint"
+    assert inner >= 0.9, "the painted area is the selection"
+    save(out, "paint.png", rgb, mp)
     if (k > 127).any():
         t = time.time()
         kr = eng.refine(rgb, k)
