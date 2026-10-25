@@ -6,7 +6,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
-from PySide6.QtCore import QObject, QRectF, Qt, Signal
+from PySide6.QtCore import QMimeData, QObject, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QGuiApplication, QImage, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox, QColorDialog, QComboBox, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
@@ -87,13 +87,17 @@ def qimage_to_rgb(img: QImage):
     return a[:, :w * 3].reshape(h, w, 3).copy()
 
 
-def write_png(path, arr):
+def encode_png(arr):
     if arr.ndim == 3:
         arr = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
     ok, buf = cv2.imencode(".png", arr, [cv2.IMWRITE_PNG_COMPRESSION, 3])
     if not ok:
         raise IOError("PNG encoding failed")
-    Path(path).write_bytes(buf.tobytes())  # imencode + write handles non-ASCII paths on Windows
+    return buf.tobytes()
+
+
+def write_png(path, arr):
+    Path(path).write_bytes(encode_png(arr))  # imencode + write handles non-ASCII paths on Windows
 
 
 def labeled_slider(text, lo, hi, val, on_change, fmt="{}"):
@@ -732,10 +736,19 @@ class MainWindow(QMainWindow):
         self.cpu.submit("export", job, lambda p: self.statusBar().showMessage(f"Saved {p}", 6000))
 
     def copy_result(self):
+        def job(stale):
+            rgba = self._final(crop)[1]
+            return rgba, encode_png(rgba)
+
         def done(r):
-            QGuiApplication.clipboard().setImage(to_qimage(r[1]).copy())
+            md = QMimeData()
+            md.setImageData(to_qimage(r[0]).copy())
+            md.setData("image/png", r[1])
+            # Windows apps read alpha only from the registered "PNG" format; the bitmap formats lose it
+            md.setData('application/x-qt-windows-mime;value="PNG"', r[1])
+            QGuiApplication.clipboard().setMimeData(md)
             self.statusBar().showMessage("Result copied to clipboard", 4000)
         if not self._has_result():
             return
         crop = self.crop.isChecked()
-        self.cpu.submit("copy", lambda s: self._final(crop), done)
+        self.cpu.submit("copy", job, done)
