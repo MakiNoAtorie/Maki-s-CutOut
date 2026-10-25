@@ -318,9 +318,15 @@ class Engine:
             prior = torch.nn.functional.grid_sample(logits[None, None], grid, align_corners=False)
             rgb = rgb[y0:y1, x0:x1]
             small, s = self._sam_inputs(rgb)
-            pts = [((x - x0) * s, (y - y0) * s) for x, y in points]
-            crop_box = None if box is None else [(v - o) * s for v, o in zip(box, (x0, y0, x0, y0))]
-            logits = self._sam_decode(self._sam_embed(rgb), small.shape[:2], pts, labels, crop_box, False, prior)
+            # only prompts inside the crop; with none left the prior alone carries the first pass
+            inside = [i for i, (x, y) in enumerate(points) if x0 <= x < x1 and y0 <= y < y1]
+            pts = [((points[i][0] - x0) * s, (points[i][1] - y0) * s) for i in inside]
+            crop_box = None
+            if box is not None:
+                cb = [min(max(v - o, 0), e) for v, o, e in zip(box, (x0, y0, x0, y0), (x1 - x0, y1 - y0) * 2)]
+                crop_box = [v * s for v in cb] if cb[2] > cb[0] and cb[3] > cb[1] else None
+            logits = self._sam_decode(self._sam_embed(rgb), small.shape[:2], pts, [labels[i] for i in inside],
+                                      crop_box, False, prior)
             H, W = rgb.shape[:2]
         k = min(1.0, maskops.WORK / max(H, W))
         # upsample logits (not probabilities) so the edge stays sharp before the guided filter
