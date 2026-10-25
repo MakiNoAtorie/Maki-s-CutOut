@@ -47,11 +47,13 @@ def shift_confidence(p, bias):
     """Move the 0.5 cut of a 0..1 probability map by bias logits: > 0 takes in more, < 0 less.
 
     Works in logit space because BiRefNet output is nearly binary: few pixels are between 0.01 and 0.99.
+    Far from the edge the logits change slowly, so the shifted map is steepened by 1 + |bias| to keep edges sharp.
     """
     if not bias:
         return p
     p = np.clip(p, 1e-6, 1 - 1e-6)
-    return 1 / (1 + np.exp(-(np.log(p / (1 - p)) + bias)))
+    z = np.clip((np.log(p / (1 - p)) + bias) * (1 + abs(bias)), -30, 30)
+    return 1 / (1 + np.exp(-z))
 
 
 def to_u8(x):
@@ -232,7 +234,8 @@ if __name__ == "__main__":
 
     p = np.array([1e-4, 0.3, 0.5, 0.9, 1.0], np.float32)
     assert (shift_confidence(p, 0) == p).all()
-    assert (shift_confidence(p, 3) > p)[:4].all() and (shift_confidence(p, -3) < p).all(), "shift confidence"
+    assert ((shift_confidence(p, 3) > 0.5) == [0, 1, 1, 1, 1]).all(), "positive bias takes in more"
+    assert ((shift_confidence(p, -3) > 0.5) == [0, 0, 0, 0, 1]).all(), "negative bias keeps less"
     assert shift_confidence(p, 10)[0] > 0.5 > shift_confidence(p, -10)[3]
 
     dist = color_distance(rgb, 10, 10)
