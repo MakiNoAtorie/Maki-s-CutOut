@@ -1,66 +1,56 @@
 # CutOut
 
-Local image extraction: drop in an image, pick what to keep, watch the live preview, export a PNG with alpha.
-Nothing is downloaded without asking: the first time a mode needs a model, the app offers it with its size (into `models/`).
-After that it runs fully offline.
+Cut subjects out of images on your own machine. Open an image, select what to keep, check the live preview and export a transparent PNG.
 
-## Launch
+Everything runs locally. The first time a feature needs an AI model, CutOut asks before downloading it and shows its size. After that it works offline.
 
-Needs [uv](https://docs.astral.sh/uv/). The first run creates the environment.
+## Install and run
 
-macOS (Apple Silicon, MPS):
+You need [uv](https://docs.astral.sh/uv/) and either a Mac with Apple Silicon or a Windows PC with an NVIDIA GPU (driver 580+). Other machines fall back to the CPU, which is slower.
 
 ```bash
+git clone https://github.com/MakiNoAtorie/Maki-s-CutOut.git
+cd Maki-s-CutOut
 uv run main.py
 ```
 
-Windows (NVIDIA, CUDA):
+The first run sets up the environment. You can also pass an image: `uv run main.py photo.jpg`.
 
-```bash
-uv run main.py
-```
+**Mac app:** `scripts/make_mac_app.sh` puts `CutOut.app` in `/Applications`. The app runs this folder, so run the script again if you move the folder.
 
-Optionally pass an image: `uv run main.py photo.jpg`.
+## How to use
 
-macOS app: `scripts/make_mac_app.sh` builds `/Applications/CutOut.app`, a launcher for this folder (re-run it if the folder moves). Log: `~/Library/Logs/CutOut.log`.
+1. **Open** an image: use Open, paste it (⌘V / Ctrl+V), or drop it on the window.
+2. **Select** the part to keep, using one of four modes (keys 1–4):
 
-Windows pulls PyTorch from the CUDA 13.0 index (Blackwell / RTX 50xx needs CUDA 12.8+); this requires an NVIDIA driver 580 or newer.
-The device is picked automatically (CUDA → MPS → CPU) and shown in the status bar with the loaded model.
+   | Mode | What it does |
+   |---|---|
+   | Auto subject | Finds the main subject as soon as the image loads. Drag a rectangle to limit the search to one area. |
+   | Paint region | Paint roughly over what you want and it is cut out cleanly. Right-drag or Alt-drag erases. |
+   | Click select | Left-click to include, right-click to exclude, drag to draw a box. |
+   | Color key | Click a colour, for example the sky, to make it transparent. Instant, no model needed. |
 
-## Modes
+3. **Apply** the selection with Enter. **Combine** decides how each new selection joins the current one: Replace, Add, Subtract or Intersect.
+4. **Polish** the edges:
+   - **Refine edges** gives finer edges on hair and branches.
+   - **Feather** softens the edge.
+   - **Shrink/Grow** moves the edge in or out.
+   - **Defringe** removes background colour bleeding into the edge.
+5. **Export** a full-resolution PNG, optionally cropped to the subject. You can also save only the mask, or copy the result to the clipboard. Your original file is never changed.
 
-| Mode | How |
-|---|---|
-| Auto subject | BiRefNet finds the main subject. Runs on load; drag a rectangle to limit it to an area. |
-| Paint region | Paint over the area you want (right-drag or Alt-drag erases). BiRefNet runs only there, so a tree in a landscape can be pulled out on its own. |
-| Click select | SAM 2.1: left click include, right click exclude, drag for a box. |
-| Color key | Click a colour (e.g. sky) to make it transparent. Tolerance, softness, invert. No model, instant. |
+**Undo** with ⌘Z or Ctrl+Z, **redo** with ⇧⌘Z or Ctrl+Shift+Z. **Esc** clears the clicks or paint you haven't applied yet. Zoom with the scroll wheel or a pinch, pan with Space+drag. ⌘0 / Ctrl+0 fits the image to the window, ⌘1 / Ctrl+1 shows it at 100%. `[` and `]` change the brush size.
 
-Models per mode: Auto/Paint → BiRefNet (445 MB), Refine edges → BiRefNet-matting (885 MB), Click select → SAM 2.1 small (185 MB), Color key → none.
+## Credits
 
-**Combine** (Replace / Add / Subtract / Intersect) sets how the next selection merges with the current mask.
-Prompt-based modes show a live candidate; press **Apply** (Enter) to commit it. Undo (Cmd+Z, or Ctrl+Z on Mac) steps back one prompt, then through committed masks, Refine included; Esc clears all prompts.
+CutOut is a front end for these models:
 
-**Refine edges** re-mattes the committed mask (one undoable step) with BiRefNet-matting for hair and branches. It can add detail near the edge
-but only trims a little inside it, and works best on Auto, Paint and Click masks.
-**Feather**, **Shrink/Grow** and **Defringe** (removes background colour bleed from edge pixels) apply live.
+- **[BiRefNet](https://github.com/ZhengPeng7/BiRefNet)** by Peng Zheng et al. ([paper](https://arxiv.org/abs/2401.03407), MIT). Used for subject detection, Paint region and Refine edges.
+- **[SAM 2.1](https://github.com/facebookresearch/sam2)** by Meta AI ([paper](https://arxiv.org/abs/2408.00714), Apache 2.0). Used for Click select.
 
-Navigation: mouse wheel, Ctrl/Cmd+scroll or trackpad pinch zooms; trackpad scroll, middle-drag or Space+drag pans.
-Views are linked by default (toggle above the preview). Keys: 1–4 switch mode, Ctrl+0 fit, Ctrl+1 100% (Cmd on Mac), [ / ] brush size.
+It is built with [PyTorch](https://pytorch.org/), [Hugging Face Transformers](https://github.com/huggingface/transformers), [Qt for Python (PySide6)](https://doc.qt.io/qtforpython/) (LGPL), [OpenCV](https://opencv.org/), [kornia](https://github.com/kornia/kornia), [timm](https://github.com/huggingface/pytorch-image-models) and [Pillow](https://python-pillow.org/).
 
-## Export
+Model weights are downloaded from Hugging Face and keep their own licenses.
 
-Export → PNG at full resolution (default), optionally cropped to the mask bounds; save the mask alone as a grayscale PNG;
-or copy the result to the clipboard. The source file is never written.
+## License
 
-## Layout
-
-```
-main.py            entry point
-app/               GUI (window.py: toolbar, modes, workers; viewer.py: zoom/pan view with proxy rendering)
-engine/            device.py (device + fp16 policy), models.py (BiRefNet, SAM 2.1, one model loaded at a time),
-                   maskops.py (guided upsampling, colour key, combine, feather/grow/defringe)
-scripts/           make_test_images.py (synthetic test images incl. a 50 MP one), smoke_test.py (headless check)
-```
-
-Checks: `uv run python engine/maskops.py` (no models) and `uv run python scripts/smoke_test.py IMAGE` (loads all three models).
+[MIT](LICENSE). This covers CutOut's own code; the models and libraries above keep their own licenses.
