@@ -40,6 +40,7 @@ The first run sets up the environment. You can also pass an image: `uv run main.
    - **Feather** softens the edge.
    - **Shrink/Grow** moves the edge in or out.
    - **Defringe** removes background colour bleeding into the edge.
+   - **Fine edges** refines the border of Click select and Paint region results with a matting model.
 5. **Export** a full-resolution PNG, optionally cropped to the subject. You can also save only the mask, or copy the result to the clipboard. Your original file is never changed.
 
 **Undo** with ⌘Z or Ctrl+Z, **redo** with ⇧⌘Z or Ctrl+Shift+Z. **Esc** clears the clicks or paint you haven't applied yet. Zoom with the scroll wheel or a pinch, pan with Space+drag. ⌘0 / Ctrl+0 fits the image to the window, ⌘1 / Ctrl+1 shows it at 100%. `[` and `]` change the brush size.
@@ -50,6 +51,7 @@ CutOut is a front end for these models:
 
 - **[BiRefNet](https://github.com/ZhengPeng7/BiRefNet)** by Peng Zheng et al. ([paper](https://arxiv.org/abs/2401.03407), MIT). Used for subject detection, Paint region and Refine edges.
 - **[SAM 2.1](https://github.com/facebookresearch/sam2)** by Meta AI ([paper](https://arxiv.org/abs/2408.00714), Apache 2.0). Used for Click select.
+- **[ViTMatte](https://github.com/hustvl/ViTMatte)** by Jingfeng Yao et al. ([paper](https://arxiv.org/abs/2305.15272), MIT). Used for Fine edges.
 
 It is built with [PyTorch](https://pytorch.org/), [Hugging Face Transformers](https://github.com/huggingface/transformers), [Qt for Python (PySide6)](https://doc.qt.io/qtforpython/) (LGPL), [OpenCV](https://opencv.org/), [kornia](https://github.com/kornia/kornia), [timm](https://github.com/huggingface/pytorch-image-models) and [Pillow](https://python-pillow.org/).
 

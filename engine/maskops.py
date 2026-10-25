@@ -162,6 +162,29 @@ def band(mask, reach):
     return outer, core
 
 
+def trimap(mask):
+    """(trimap, reach) for matting: 255 fg / 0 bg, each eroded by reach px, 128 between. None without a band.
+
+    reach is 1.5% of the mask's bounding box, at least 8 px. Morphology runs at <=1024 px, like band.
+    """
+    box = bbox(mask)
+    if box is None:
+        return None
+    reach = max(8, round(0.015 * max(box[2] - box[0], box[3] - box[1])))
+    H, W = mask.shape
+    f = max(1.0, max(H, W) / 1024)
+    small = mask if f == 1 else cv2.resize(mask, (round(W / f), round(H / f)), interpolation=cv2.INTER_AREA)
+    r = max(1, round(reach / f))
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    fg, bg = (cv2.erode(x.astype(np.uint8), k) for x in (small > 127, small <= 127))
+    if f > 1:
+        fg, bg = (cv2.resize(x, (W, H), interpolation=cv2.INTER_NEAREST) for x in (fg, bg))
+    tri = np.full((H, W), 128, np.uint8)
+    tri[fg > 0] = 255
+    tri[bg > 0] = 0
+    return (tri, reach) if (tri == 128).any() else None
+
+
 def fill_holes(mask, open_):
     """mask with its enclosed background filled: a component of mask <= 127 that does not touch open_.
 
@@ -288,6 +311,9 @@ if __name__ == "__main__":
     ring[440:460, 705:] = 255
     assert fill_holes(ring, d3 > 310)[(d3 > 101) & (d3 < 109)].min() == 255, "enclosed gap filled"
     assert (fill_holes(ring, d3 > 104) == ring)[(d3 > 105) & (d3 < 109)].all(), "open_ seeds the background"
+    tri, _ = trimap((a3 * 255).astype(np.uint8))  # reach 9 px
+    assert tri[450, 600] == 255 and tri[5, 5] == 0 and (tri[450, 893:908] == 128).all() and tri[450, 911] == 0
+    assert trimap(np.zeros_like(ring)) is None
     p = np.array([1e-4, 0.3, 0.5, 0.9, 1.0], np.float32)
     assert (shift_confidence(p, 0) == p).all()
     assert ((shift_confidence(p, 3) > 0.5) == [0, 1, 1, 1, 1]).all(), "positive bias takes in more"

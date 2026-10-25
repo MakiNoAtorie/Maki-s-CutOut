@@ -23,8 +23,9 @@ REPOS = {
     "BiRefNet": ("ZhengPeng7/BiRefNet", "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4"),
     "BiRefNet-matting": ("ZhengPeng7/BiRefNet-matting", "eccde0a8cbdce7ac5fecfeb06340fe7b949e85d9"),
     "SAM 2.1 small": ("facebook/sam2.1-hiera-small", "ee5bba1d82bb8749febdf90f45e84b687142ba03"),
+    "ViTMatte small": ("hustvl/vitmatte-small-composition-1k", "6a58ad7646403c1df626fbd746900aec7361ea1d"),
 }
-DOWNLOAD_MB = {"BiRefNet": 445, "BiRefNet-matting": 885, "SAM 2.1 small": 185}
+DOWNLOAD_MB = {"BiRefNet": 445, "BiRefNet-matting": 885, "SAM 2.1 small": 185, "ViTMatte small": 105}
 BIREFNET_RES = 1024
 MEAN = np.array([0.485, 0.456, 0.406], np.float32)
 STD = np.array([0.229, 0.224, 0.225], np.float32)
@@ -86,6 +87,7 @@ class Engine:
         self.model = None
         self.processor = None
         self.sam_cache = OrderedDict()  # image id -> embeddings (CPU while SAM is unloaded)
+        self.matte = None  # (processor, model): small, so it stays loaded beside the slot model
 
     # ---------- model switching ----------
 
@@ -114,7 +116,10 @@ class Engine:
                 self.sam_cache[k] = [e.to(DEVICE) for e in emb]
 
     def download(self, name, on_status=lambda msg: None):
-        self.use(name, on_status, download=True)
+        if name == "ViTMatte small":
+            self._matte_model(on_status, download=True)
+        else:
+            self.use(name, on_status, download=True)
 
     def unload(self):
         if self.model is None:
@@ -242,6 +247,55 @@ class Engine:
         out = mask.copy()
         # the matte only decides inside the band: it may add detail up to reach px out, never remove the core
         out[y0:y1, x0:x1] = np.maximum(np.minimum(matte, outer), core)
+        return out
+
+    def _matte_model(self, on_status=lambda msg: None, download=False):
+        if self.matte is None:
+            from transformers import VitMatteForImageMatting, VitMatteImageProcessor
+            name = "ViTMatte small"
+            on_status(f"Loading {name}…")
+            try:
+                processor = _load(VitMatteImageProcessor, name, on_status, download)
+                model = _load_model(VitMatteForImageMatting, name, on_status, download=download)
+            except ModelMissing:
+                raise
+            except Exception as e:
+                raise RuntimeError(f"Could not load {name}: {e}") from e
+            self.matte = processor, model.to(DEVICE).eval()
+        return self.matte
+
+    @torch.inference_mode()
+    def matte_edges(self, rgb, mask, on_status=lambda msg: None):
+        """ViTMatte on the mask's border band, at native resolution in overlapping tiles. Only the band changes."""
+        t = maskops.trimap(mask)
+        if t is None:
+            return mask
+        tri, reach = t
+        unknown = tri == 128
+        processor, model = self._matte_model(on_status)
+        H, W = mask.shape
+        x0, y0, x1, y1 = maskops.pad_box(maskops.bbox(unknown, 0), reach, W, H)
+        acc = np.zeros((y1 - y0, x1 - x0), np.float32)
+        n = np.zeros_like(acc)
+        T, step = 1024, 1024 - 128  # tiles overlap 128 px
+        on_status("Matting edges…")
+        for ty in [*range(y0, y1 - T, step), max(y0, y1 - T)]:  # last tile ends on the edge, at full size
+            for tx in [*range(x0, x1 - T, step), max(x0, x1 - T)]:
+                sl = np.s_[ty:min(ty + T, y1), tx:min(tx + T, x1)]
+                u = unknown[sl]
+                if not u.any():
+                    continue
+                inputs = processor(images=rgb[sl], trimaps=tri[sl], return_tensors="pt").to(DEVICE)
+                with autocast():
+                    a = model(**inputs).alphas
+                h, w = u.shape  # the processor pads bottom/right to a multiple of 32
+                a = a[0, 0, :h, :w].float().cpu().numpy()
+                o = np.s_[ty - y0:ty - y0 + h, tx - x0:tx - x0 + w]
+                acc[o][u] += a[u]
+                n[o][u] += 1
+        out = mask.copy()
+        u = unknown[y0:y1, x0:x1]
+        out[y0:y1, x0:x1][u] = maskops.to_u8(acc[u] / n[u])
         return out
 
     # ---------- SAM 2.1 ----------

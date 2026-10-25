@@ -263,6 +263,10 @@ class MainWindow(QMainWindow):
         fin.addWidget(w)
         w, self.defringe = labeled_slider("Defringe", 0, 100, 100, self.refresh, "{} %")
         fin.addWidget(w)
+        self.fine = QCheckBox("Fine edges", checked=True)
+        self.fine.setToolTip("Trimap matting (ViTMatte) refines the border of Click select and Paint region results")
+        self.fine.toggled.connect(self._fine_toggled)
+        fin.addWidget(self.fine)
 
         self.source, self.preview = ImageView(), ImageView()
         self.source.set_background(QColor(40, 40, 40))
@@ -501,10 +505,11 @@ class MainWindow(QMainWindow):
             self.models.cancel("paint")
             self.candidate = None
             return self.refresh()
-        rgb, iid, paint = self.rgb, self.image_id, self.paint.copy()
+        rgb, iid, paint, fine = self.rgb, self.image_id, self.paint.copy(), self.fine.isChecked()
 
         def job(stale):
-            return self.engine.paint(iid, rgb, paint, on_status=self.models.status.emit)
+            m = self.engine.paint(iid, rgb, paint, on_status=self.models.status.emit)
+            return self.engine.matte_edges(rgb, m, self.models.status.emit) if fine else m
 
         self.models.submit("paint", job, self._guard(self._set_candidate))
 
@@ -582,8 +587,19 @@ class MainWindow(QMainWindow):
             self.candidate = None
             return self.refresh()
         rgb, iid, pts, lbl, box = self.rgb, self.image_id, list(self.points), list(self.labels), self.box
-        self.models.submit("sam", lambda s: self.engine.sam(iid, rgb, pts, lbl, box, self.models.status.emit),
-                           self._guard(self._set_candidate))
+        fine = self.fine.isChecked()
+
+        def job(stale):
+            m = self.engine.sam(iid, rgb, pts, lbl, box, self.models.status.emit)
+            return self.engine.matte_edges(rgb, m, self.models.status.emit) if fine else m
+
+        self.models.submit("sam", job, self._guard(self._set_candidate))
+
+    def _fine_toggled(self):
+        if self.mode_name() == "Click select" and (self.points or self.box is not None):
+            self.run_sam()
+        elif self.mode_name() == "Paint region" and self.paint is not None and self.paint.any():
+            self.run_paint()
 
     def run_key(self):
         if self.rgb is None or self.key_pick is None:

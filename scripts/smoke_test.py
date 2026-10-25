@@ -46,6 +46,11 @@ def main():
     print(f"sam: first {t1:.1f}s (load+embed), cached {time.time() - t:.2f}s")
     assert s1.shape == (H, W) and (s1 > 127).any() and (s2 > 127).any()
     save(out, "sam_point.png", rgb, s1)
+    t = time.time()
+    fe = eng.matte_edges(rgb, s1)
+    print(f"matte edges: {time.time() - t:.1f}s (with load)")
+    assert fe.shape == (H, W) and (fe == s1)[maskops.trimap(s1)[0] != 128].all(), "matte_edges changes only the band"
+    save(out, "sam_point_fine.png", rgb, fe)
 
     t = time.time()
     r = eng.refine(rgb, m)
