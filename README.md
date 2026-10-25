@@ -18,6 +18,8 @@ The first run sets up the environment. You can also pass an image: `uv run main.
 
 **Mac app:** `scripts/make_mac_app.sh` puts `CutOut.app` in `/Applications`. The app runs this folder, so run the script again if you move the folder.
 
+**Windows:** double-click `CutOut.bat`, or drop an image on it. It keeps a console window open while CutOut runs.
+
 **Windows shortcut:** `powershell -ExecutionPolicy Bypass -File scripts\make_windows_shortcut.ps1` adds CutOut to the Start menu. It opens without a console window and logs to `%LOCALAPPDATA%\CutOut\CutOut.log`. Run the script again if you move the folder or delete `.venv`.
 
 ## How to use
