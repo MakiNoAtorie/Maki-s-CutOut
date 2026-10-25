@@ -236,9 +236,9 @@ def defringe(rgb, alpha, strength):
 
 def finish(rgb, mask, grow_px=0, feather_px=0.0, defringe_amt=0.0, scale=1.0):
     """Apply shrink/grow, feather and defringe. Pixel params are in full-res pixels; scale = this res / full."""
-    a = grow(mask, round(grow_px * scale))
-    a = feather(a, feather_px * scale)
-    return defringe(rgb, a, defringe_amt), a
+    # defringe reads the raw mask: only there is a soft pixel a real colour mix
+    a = feather(grow(mask, round(grow_px * scale)), feather_px * scale)
+    return defringe(rgb, mask, defringe_amt), a
 
 
 if __name__ == "__main__":

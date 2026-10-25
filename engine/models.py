@@ -131,8 +131,8 @@ class Engine:
     def subject_raw(self, rgb, rect=None, region=None, on_status=lambda msg: None):
         """Model output for subject_mask: (probability map at model res, crop box, region crop or None).
 
-        region: uint8 HxW, 255 = area of interest. Only its bounding box is processed; pixels outside it
-        are greyed out so the model ignores them, and the result is clipped to the region.
+        region: uint8 HxW, 255 = area of interest. Only its padded bounding box is processed, and the result
+        is clipped to the region.
         """
         self.use("BiRefNet", on_status)
         H, W = rgb.shape[:2]
@@ -147,13 +147,9 @@ class Engine:
             x0, y0 = min(max(0, (x0 + x1 - nw) // 2), W - nw), min(max(0, (y0 + y1 - nh) // 2), H - nh)
             rect = (x0, y0, x0 + nw, y0 + nh)
         x0, y0, x1, y1 = rect or (0, 0, W, H)
-        crop = rgb[y0:y1, x0:x1]
-        inp = crop
-        if region is not None:
-            inp = crop.copy()
-            inp[region[y0:y1, x0:x1] < 128] = 128
         on_status("Detecting subject…")
-        return self._birefnet(inp), (x0, y0, x1, y1), None if region is None else region[y0:y1, x0:x1]
+        # no grey fill outside the region: the model then mattes the whole non-grey blob, background included
+        return self._birefnet(rgb[y0:y1, x0:x1]), (x0, y0, x1, y1), None if region is None else region[y0:y1, x0:x1]
 
     def refine(self, rgb, mask, on_status=lambda msg: None):
         """Re-matte the masked region with BiRefNet-matting for soft hair/branch alpha."""
@@ -168,11 +164,8 @@ class Engine:
         on_status("Refining edges…")
         reach = max(4, round(0.02 * max(x1 - x0, y1 - y0)))
         outer, core = maskops.band(m, reach)
-        # grey out everything beyond the edge band so the matting model mattes *this* selection,
-        # not whatever it finds salient in the crop
-        inp = crop.copy()
-        inp[outer < 128] = 128
-        matte = maskops.guided_upsample(self._birefnet(inp), crop, BIREFNET_RES, eps=1e-4)
+        # no grey fill beyond the band: the model then mattes the whole band ring as foreground
+        matte = maskops.guided_upsample(self._birefnet(crop), crop, BIREFNET_RES, eps=1e-4)
         out = mask.copy()
         # the matte only decides inside the band: it may add detail up to reach px out, never remove the core
         out[y0:y1, x0:x1] = np.maximum(np.minimum(matte, outer), core)
