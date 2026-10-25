@@ -9,10 +9,6 @@ def _box(x, r):
     return cv2.boxFilter(x, -1, (2 * r + 1, 2 * r + 1), borderType=cv2.BORDER_REFLECT)
 
 
-def gray(rgb):
-    return cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-
-
 def _stats(I, w, r):
     """(weight sum, mean, std) of I over the weighted pixels in each (2r+1) window."""
     w = w.astype(np.float32)
@@ -25,42 +21,49 @@ def _stats(I, w, r):
 def guided_upsample(mask_lr, rgb, model_res, eps=1e-3):
     """Upsample a low-res soft mask (float 0..1) to rgb's size, snapping its edge to the image.
 
-    Each pixel is mapped linearly between the local mean grey of confident foreground (p > 0.95)
+    Each pixel is mapped linearly between the local mean colour of confident foreground (p > 0.95)
     and confident background (p < 0.05), each pulled 2 std toward the other so texture stays opaque.
+    Colour-line form: alpha = a . rgb + b with a along F - B, so edges snap where fg and bg differ only in hue.
     A least-squares guided filter cannot do this: it reproduces the mean of a soft p per colour.
     Coefficients are solved at <= WORK px, then applied at full res, so edges follow the full-res image.
     The result is clamped to p eroded/dilated by 2 model px: the image decides only inside the
     model's own uncertainty band. Where one side is missing or has no contrast, the result is p.
-    ponytail: grayscale guide; a colour guide would keep the snap active where fg/bg share luminance.
     """
     H, W = rgb.shape[:2]
     s = min(1.0, WORK / max(H, W))
     w, h = max(1, round(W * s)), max(1, round(H * s))
     small = rgb if s == 1.0 else cv2.resize(rgb, (w, h), interpolation=cv2.INTER_AREA)
-    I = gray(small).astype(np.float32) / 255
+    I = small.astype(np.float32) / 255
     p = cv2.resize(mask_lr.astype(np.float32), (w, h), interpolation=cv2.INTER_LINEAR)
     m = max(w, h) / model_res  # work px per model px
     r = max(2, round(6 * m))  # window must span the uncertainty band to see confident px on both sides
-    nf, F, sf = _stats(I, p > 0.95, r)
-    nb, B, sb = _stats(I, p < 0.05, r)
+
+    def stats3(wt):
+        st = [_stats(I[..., ch], wt, r) for ch in range(3)]
+        return st[0][0], np.dstack([x[1] for x in st]), np.dstack([x[2] for x in st])
+
+    nf, F, sf = stats3(p > 0.95)
+    nb, B, sb = stats3(p < 0.05)
     g = np.sign(F - B)
     F -= 2 * g * sf
     B += 2 * g * sb
     d = g * np.maximum(g * (F - B), 0)  # 0 where the two sides overlap
+    dd = (d * d).sum(-1)
     n = np.minimum(nf, nb)
-    c = n / (n + 0.005) * (d * d) / (d * d + eps)
-    a = c * d / np.maximum(d * d, 1e-6)
-    b = (1 - c) * p - a * B
+    c = n / (n + 0.005) * dd / (dd + eps)
+    a = c[..., None] * d / np.maximum(dd, 1e-6)[..., None]
+    b = (1 - c) * p - (a * B).sum(-1)
+    a *= 1 / 255  # applied to uint8 rgb
     k = np.ones((2 * max(1, round(2 * m)) + 1,) * 2, np.uint8)
     lo, hi = cv2.erode(p, k), cv2.dilate(p, k)
-    if s < 1.0:
-        a, b, lo, hi = (cv2.resize(x, (W, H), interpolation=cv2.INTER_LINEAR) for x in (a, b, lo, hi))
-        I = gray(rgb).astype(np.float32)
-        I *= 1 / 255
-    a *= I
-    a += b
-    np.clip(a, lo, hi, out=a)
-    return to_u8(a)
+    up = (lambda x: x) if s == 1.0 else (lambda x: cv2.resize(x, (W, H), interpolation=cv2.INTER_LINEAR))
+    acc, lo, hi = up(b), up(lo), up(hi)
+    for ch in range(3):  # one full-res plane at a time
+        ac = up(np.ascontiguousarray(a[..., ch]))
+        ac *= rgb[..., ch]
+        acc += ac
+    np.clip(acc, lo, hi, out=acc)
+    return to_u8(acc)
 
 
 def shift_confidence(p, bias):
@@ -298,6 +301,8 @@ if __name__ == "__main__":
     lr = cv2.resize(a_true.astype(np.float32), (64, 48), interpolation=cv2.INTER_AREA)
     up = guided_upsample(lr, rgb, 64)
     assert up.shape == (H, W) and abs(up.astype(float) / 255 - a_true).mean() < 0.01, "guided upsample"
+    iso = (a_true[..., None] * [190, 60, 80] + (1 - a_true[..., None]) * [60, 110, 120]).astype(np.uint8)  # greys 101 / 96
+    assert abs(guided_upsample(lr, iso, 64).astype(float) / 255 - a_true).mean() < 0.01, "colour guide: iso-luminant edge"
 
     # hard-edged textured disc, soft 4.7x-upsampled model edge: snap to the image, no halo, solid interior
     yy, xx = np.mgrid[:900, :1200]

@@ -14,6 +14,7 @@
 ### Fixed
 
 - Auto subject, Click select and Refine: edges are no longer blurred where the subject and the background have similar brightness (for example a red hat on a dark grey wall).
+- Auto subject, Click select, Paint region and Refine: edges also snap to the photo where the subject and the background differ only in colour, not in brightness.
 - Auto subject, Click select and Refine: edges follow the photo closely. There is no more soft band just inside the edge and no faint blurred copy of the subject just outside it.
 - The subject is fully opaque. Before, it was very slightly transparent everywhere.
 - Feather and Shrink no longer change the colours of the subject when Defringe is on. Defringe now only cleans pixels that are really part subject, part background.
