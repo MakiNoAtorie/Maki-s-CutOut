@@ -4,6 +4,9 @@
 
 ### Added
 
+- A Windows installer, `MakisCutOut-v0.5.0-Beta-Setup.exe`. It installs per user without admin rights, adds a Start menu shortcut and an uninstaller, and downloads the Python environment during setup.
+- **Check for updates** in the toolbar. It looks for a newer release on GitHub, pre-releases included. In the installed app it downloads the installer, checks it against GitHub's checksum and upgrades in place. It connects to the internet only when you click it.
+- The app is now named Maki's CutOut in its window title and taskbar.
 - Auto subject: a **Reach** slider. Move it right to take in parts the model was unsure about, or left to keep only what it is sure of. It changes the last detection in place, without running the model again or adding an undo step.
 - Click select and Paint region: a **Fine edges** option, on by default. A matting model (ViTMatte) refines the border at full resolution, so hair and soft edges come out cleaner. It downloads ~105 MB the first time.
 - If the main model is already downloaded but the Fine edges model is not, CutOut asks to download it at launch, not on the first click.

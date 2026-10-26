@@ -6,6 +6,11 @@ if sys.stdout is None:  # pythonw (Windows shortcut) has no console; tqdm and tr
     os.makedirs(LOG, exist_ok=True)
     sys.stdout = sys.stderr = open(os.path.join(LOG, "CutOut.log"), "a", buffering=1, encoding="utf-8")
 
+if sys.platform == "win32":  # taskbar groups under the installed shortcut; Setup checks the mutex to find a running copy
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("MakiNoAtorie.MakisCutOut")
+    ctypes.windll.kernel32.CreateMutexW(None, False, "MakisCutOut")
+
 import engine.device  # noqa: E402,F401  sets PYTORCH_ENABLE_MPS_FALLBACK before torch loads
 from PySide6.QtGui import QIcon  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
@@ -15,7 +20,7 @@ from app.window import MainWindow  # noqa: E402
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("CutOut")
+    app.setApplicationName("Maki's CutOut")
     app.setWindowIcon(QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app", "icon.svg")))
     w = MainWindow()
     w.show()

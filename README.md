@@ -6,7 +6,9 @@ Everything runs locally. The first time a feature needs an AI model, CutOut asks
 
 ## Install and run
 
-You need [uv](https://docs.astral.sh/uv/) and either a Mac with Apple Silicon or a Windows PC with an NVIDIA GPU (driver 580+). Other machines fall back to the CPU, which is slower.
+**Windows installer:** download `MakisCutOut-v0.5.0-Beta-Setup.exe` from [Releases](https://github.com/MakiNoAtorie/Maki-s-CutOut/releases) and run it. It installs for your user only (no admin rights) into `%LOCALAPPDATA%\Programs\Maki's CutOut`, then downloads Python and PyTorch (about 3 GB, ~4 GB on disk). **Check for updates** in the toolbar finds a newer release, downloads its installer and upgrades in place; your models are kept. Uninstall from Settings > Apps; this also removes the downloaded models. To build the installer, set `VERSION` in `app/__init__.py`, install Inno Setup 7 and run `powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1`. Publish a release tagged `v` + `VERSION` with the setup file attached, so Check for updates finds it.
+
+**From source:** you need [uv](https://docs.astral.sh/uv/) and either a Mac with Apple Silicon or a Windows PC with an NVIDIA GPU (driver 580+). Other machines fall back to the CPU, which is slower.
 
 ```bash
 git clone https://github.com/MakiNoAtorie/Maki-s-CutOut.git

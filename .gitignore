@@ -5,3 +5,5 @@ test_images/
 smoke_out/
 .DS_Store
 Test images/
+dist/
+installer/build/

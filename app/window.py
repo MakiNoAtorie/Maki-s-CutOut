@@ -1,3 +1,4 @@
+import subprocess
 import sys
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -6,8 +7,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
-from PySide6.QtCore import QMimeData, QObject, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QGuiApplication, QImage, QKeySequence
+from PySide6.QtCore import QMimeData, QObject, QRectF, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QGuiApplication, QImage, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox, QColorDialog, QComboBox, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
     QProgressBar, QPushButton, QSlider, QSplitter, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
@@ -17,6 +18,7 @@ from engine import maskops
 from engine.device import device_label
 from engine.models import DOWNLOAD_MB, Engine, is_cached, subject_mask
 
+from . import VERSION, update
 from .viewer import ImageView, make_proxy, to_qimage
 
 Image.MAX_IMAGE_PIXELS = 300_000_000
@@ -118,7 +120,7 @@ def labeled_slider(text, lo, hi, val, on_change, fmt="{}"):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CutOut")
+        self.setWindowTitle("Maki's CutOut")
         self.resize(1500, 900)
         self.setAcceptDrops(True)
         self.engine = Engine()
@@ -183,6 +185,27 @@ class MainWindow(QMainWindow):
             r.pool.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(e)
 
+    def check_updates(self):
+        self.statusBar().showMessage("Checking for updates…")
+        self.cpu.submit("update", lambda s: update.latest(), self._update_found)
+
+    def _update_found(self, rel):
+        if rel is None:
+            return self.statusBar().showMessage(f"Maki's CutOut v{VERSION} is up to date", 5000)
+        msg = f"Maki's CutOut {rel['tag']} is available. You have v{VERSION}.\n\n"
+        if not (rel["setup"] and update.installed() and sys.platform == "win32"):
+            if QMessageBox.question(self, "Update available", msg + "Open the download page?") == QMessageBox.Yes:
+                QDesktopServices.openUrl(QUrl(rel["page"]))
+            return
+        if QMessageBox.question(self, "Update available", msg + "Download and install it now? Maki's CutOut closes "
+                                "while Setup runs. Your downloaded models are kept.") == QMessageBox.Yes:
+            self.statusBar().showMessage(f"Downloading {rel['tag']}…")
+            self.cpu.submit("update", lambda s: update.download(rel["setup"], rel["sha256"]), self._run_setup)
+
+    def _run_setup(self, path):
+        subprocess.Popen([str(path)])  # Setup waits for this app's mutex, so close now
+        self.close()
+
     # ================= UI =================
 
     def _build_ui(self):
@@ -213,6 +236,10 @@ class MainWindow(QMainWindow):
         exp.setMenu(menu)
         exp.clicked.connect(self.export)
         tb.addWidget(exp)
+        tb.addSeparator()
+        upd = self._act("Check for updates", self.check_updates)
+        upd.setToolTip(f"You have v{VERSION}. Looks for a newer release on GitHub")
+        tb.addAction(upd)
 
         self.addToolBarBreak()
         sel = self.addToolBar("Selection")
@@ -429,7 +456,7 @@ class MainWindow(QMainWindow):
         self.source.set_image(self.rgb, self.rgb_proxy, fit=True)
         self.preview.set_image(self.rgb, self.rgb_proxy, fit=True)
         h, w = rgb.shape[:2]
-        self.setWindowTitle(f"CutOut — {path.name if path else 'pasted image'} ({w}×{h})")
+        self.setWindowTitle(f"Maki's CutOut — {path.name if path else 'pasted image'} ({w}×{h})")
         self.statusBar().showMessage(f"Loaded {w}×{h}", 3000)
         self.mode_changed()
 
